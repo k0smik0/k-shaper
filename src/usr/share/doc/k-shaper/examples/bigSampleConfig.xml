@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+	Copyright 2005, Massimiliano Leone <massimiliano.leone@studio.unibo.it>, GPL License
+	
+	This is XSD Schema, a template for configuration istances .xml
+	tHIS is part of k-shaper software
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="/var/lib/k-shaper/schema/config.xsd">
+	<queue direction="both">
+		<root default="200">
+			<class leaf="yes">
+				<id name="http">10</id>
+				<rate unit="mbit">1</rate>
+				<sched>sfq</sched>
+				<filter>
+					<application>http</application>
+				</filter>
+			</class>
+			<class>
+				<id name="remote_commands">20</id>
+				<rate unit="mbps">5</rate>
+				<class leaf="yes">
+					<id name="ssh">22</id>
+					<rate unit="mbps">2</rate>
+					<sched>sfq</sched>
+					<filter>
+						<application>ssh</application>
+						<port target="source" protocol="tcp">22</port>
+					</filter>
+				</class>
+				<class leaf="yes" ceil="1">
+					<id name="telnet">23</id>
+					<rate unit="mbps">2</rate>
+					<sched limit="50">pfifo</sched>
+					<filter>
+						<application>telnet</application>
+						<ip target="source">102.12.67.1</ip>
+						<ip target="source">127.0.0.1</ip>
+					</filter>
+				</class>
+			</class>
+			<class>
+				<id name="local_p2p">50</id>
+				<rate unit="kbit">1</rate>
+				<class leaf="yes">
+					<id name="kazaa">51</id>
+					<rate unit="kbit">1</rate>
+					<filter>
+						<command>kazaa</command>
+					</filter>
+				</class>
+				<class leaf="yes">
+					<id name="amule">52</id>
+					<rate unit="mbit">100</rate>
+					<filter>
+						<command>amule</command>
+					</filter>
+				</class>
+			</class>
+			<class leaf="yes">
+				<id name="icq">60</id>
+				<rate unit="kbit">100</rate>
+				<filter>
+				    <string>icq</string>
+				</filter>
+			</class>
+			<class>
+				<id name="default">200</id>
+				<rate unit="kbit">1</rate>
+			</class>
+		</root>
+	</queue>
+</config>

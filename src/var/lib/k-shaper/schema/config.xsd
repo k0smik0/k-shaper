@@ -1,0 +1,439 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+	Copyright 2005, Massimiliano Leone <massimiliano.leone@studio.unibo.it>, GPL License
+	
+	This is XSD Schema, a template for configuration istances .xml
+	tHIS is part of k-shaper software
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+	xmlns:sch="http://www.ascc.net/xml/schematron">
+
+	<xs:annotation>
+		<xs:appinfo>
+			<sch:schema
+				xmlns:sch="http://www.ascc.net/xml/schematron">
+				<sch:pattern name="limit quantum and perturb">
+					<sch:rule context="sched">
+						<sch:report
+							test="@limit and normalize-space(.) = 'sfq'">
+							You can use attribute "limit" only with "pfifo" or "bfifo"
+						</sch:report>
+						<sch:report
+							test="@perturb and not(normalize-space(.) = 'sfq')">
+							You can use attribute "perturb" only with "sfq"
+						</sch:report>
+						<sch:report
+							test="@quantum and not(normalize-space(.) = 'sfq')">
+							You can use attribute "quantum" only with "sfq"
+						</sch:report>
+					</sch:rule>
+				</sch:pattern>
+				<sch:pattern name="isLeaf">
+					<sch:rule context="//class">
+						<sch:report
+							test="(child::filter) and not(@leaf)">
+							Attribute leaf is missing in a class with filter
+						</sch:report>
+						<sch:report
+							test="not(child::filter) and @leaf">
+							Attribute leaf is used in a class without any filter
+						</sch:report>
+					</sch:rule>
+				</sch:pattern>
+				<sch:pattern name="ceil check">
+					<sch:rule context="class">
+						<sch:report test="@ceil &gt; rate">
+							Ceil must be minor than rate
+						</sch:report>
+					</sch:rule>
+				</sch:pattern>
+				<sch:pattern name="default check">
+					<sch:rule context="root">
+						<sch:report
+							test="@default and not(class/id[@name='default'])">
+							No match between Default Class Id in "root" and "class" tags
+						</sch:report>
+						<sch:report
+							test="@default != class/id[@name='default']">
+							No match between Default Class Id in "root" and "class" tags
+						</sch:report>
+					</sch:rule>
+				</sch:pattern>
+			</sch:schema>
+		</xs:appinfo>
+	</xs:annotation>
+
+
+	<xs:element name="config">
+		<xs:annotation>
+			<xs:documentation>
+				At least 1 queue must be present
+			</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="queue" maxOccurs="unbounded"
+					minOccurs="1" />
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="queue">
+		<xs:annotation>
+			<xs:documentation>
+				queue must have 1 and only 1 root; it can have 3
+				attributes: 
+				- direction: any in upload, download or both; 
+				- r2q: coefficient for computing DRR (Deficit Round Robin)
+					quanta. The default value of 10 is good for rates from
+					5-500kbps and should be increased for higher rates.]; 
+				- dcache: turns on "dequeue cache" which results in degraded 
+					fairness but allows HTB to be used on very fast network 
+					devices. This is turned off by default
+			</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="root" minOccurs="1" maxOccurs="1" />
+			</xs:sequence>
+			<xs:attribute ref="direction" use="required" />
+			<xs:attribute name="r2q" type="xs:positiveInteger"
+				default="10" use="optional" />
+			<xs:attribute name="dcache" use="optional">
+				<xs:simpleType>
+					<xs:restriction base="xs:string">
+						<xs:enumeration value="yes" />
+						<xs:enumeration value="no" />
+					</xs:restriction>
+				</xs:simpleType>
+			</xs:attribute>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="root">
+		<xs:annotation>
+			<xs:documentation>
+				root has N child classes (at least 1); 
+				every class has a unique id and name; 
+				&quot;default&quot; attribute is useful: you can specify 
+				default class id... then, where you want, you'll write a class 
+				with name=&quot;default&quot; and 
+				id=&quot;what_specificied_in_root_with_default_attribute&quot;
+			</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="class" minOccurs="1"
+					maxOccurs="unbounded" />
+			</xs:sequence>
+			<xs:attribute name="default" type="xs:positiveInteger"
+				use="required" />
+		</xs:complexType>
+		<xs:unique name="uniqIdinRoot">
+			<xs:selector xpath=".//class" />
+			<xs:field xpath="id" />
+		</xs:unique>
+		<xs:unique name="uniqNameinRoot">
+			<xs:selector xpath=".//class" />
+			<xs:field xpath=".//id/@name" />
+		</xs:unique>
+	</xs:element>
+	<xs:simpleType name="idType">
+		<xs:restriction base="xs:positiveInteger">
+			<xs:minInclusive value="2" />
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:attribute name="name">
+		<xs:annotation>
+			<xs:documentation>
+				This attribute is not required for setting queue in
+				kernel, but it's useful for write xml stanza document.
+				So it come as &quot;required&quot;
+			</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="1" />
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:attribute>
+	<xs:element name="id">
+		<xs:complexType>
+			<xs:simpleContent>
+				<xs:extension base="idType">
+					<xs:attribute ref="name" use="required" />
+				</xs:extension>
+			</xs:simpleContent>
+		</xs:complexType>
+	</xs:element>
+	<xs:attribute name="unit">
+		<xs:annotation>
+			<xs:documentation>
+				Attribute &quot;unit&quot; can be kbit, mbit,
+				bps(BytesPerSecond),kbps or mbps
+			</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:enumeration value="kbit" />
+				<xs:enumeration value="mbit" />
+				<xs:enumeration value="bps" />
+				<xs:enumeration value="kbps" />
+				<xs:enumeration value="mbps" />
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:attribute>
+	<xs:simpleType name="rateType">
+		<xs:restriction base="xs:positiveInteger">
+			<xs:minInclusive value="1" />
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="rate">
+		<xs:annotation>
+			<xs:documentation>An integer is required.</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:simpleContent>
+				<xs:extension base="rateType">
+					<xs:attribute ref="unit" use="required" />
+				</xs:extension>
+			</xs:simpleContent>
+		</xs:complexType>
+	</xs:element>
+	<xs:attribute name="target">
+		<xs:annotation>
+			<xs:documentation>
+				It refer to &quot;ip&quot; or &quot;port&quot;
+			</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:enumeration value="source" />
+				<xs:enumeration value="destination" />
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:attribute>
+	<xs:attribute name="protocol">
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:enumeration value="tcp" />
+				<xs:enumeration value="udp" />
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:attribute>
+	<xs:simpleType name="ipType">
+		<xs:restriction base="xs:string">
+			<xs:pattern
+				value="((0|1[0-9]{0,2}|2([0-4][0-9]?|5[0-5]?|[6-9])?|[3-9][0-9]?)\.){3}(0|1[0-9]{0,2}|2([0-4][0-9]?|5[0-5]?|[6-9])?|[3-9][0-9]?)" />
+			<!-- <xs:pattern
+				value="((1?[0-9]?[0-9]|2[0-4][0-9]|25[0-5])\.){3}(1?[0-9]?[0-9]|2[0-4][0-9]|25[0-5])">
+				</xs:pattern> -->
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="portType">
+		<xs:restriction base="xs:positiveInteger">
+			<xs:maxInclusive value="65536" />
+			<xs:minInclusive value="1" />
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:group name="filtersGroup">
+		<xs:annotation>
+			<xs:documentation>
+				A useful filters: ip, port, application protocol (as
+				http, ssh, ftp...), user or group or session or pid or
+				command for local processes, string (within traffic...).
+				At least 1 filter, at maximum... how many you want :D
+			</xs:documentation>
+		</xs:annotation>
+		<xs:choice>
+			<xs:element name="ip" minOccurs="0" maxOccurs="unbounded">
+				<xs:complexType>
+					<xs:simpleContent>
+						<xs:extension base="ipType">
+							<xs:attribute ref="target" use="required" />
+						</xs:extension>
+					</xs:simpleContent>
+				</xs:complexType>
+			</xs:element>
+			<xs:element name="port" minOccurs="0"
+				maxOccurs="unbounded">
+				<xs:complexType>
+					<xs:simpleContent>
+						<xs:extension base="portType">
+							<xs:attribute ref="target" use="required" />
+							<xs:attribute ref="protocol" use="required" />
+						</xs:extension>
+					</xs:simpleContent>
+				</xs:complexType>
+			</xs:element>
+			<xs:element name="application" minOccurs="0"
+				maxOccurs="unbounded">
+				<xs:simpleType>
+					<xs:restriction base="xs:string">
+						<xs:minLength value="1" />
+					</xs:restriction>
+				</xs:simpleType>
+			</xs:element>
+			<xs:element name="user" minOccurs="0"
+				maxOccurs="unbounded">
+				<xs:simpleType>
+					<xs:restriction base="xs:string">
+						<xs:minLength value="1" />
+					</xs:restriction>
+				</xs:simpleType>
+			</xs:element>
+			<xs:element name="group" minOccurs="0"
+				maxOccurs="unbounded">
+				<xs:simpleType>
+					<xs:restriction base="xs:string">
+						<xs:minLength value="1" />
+					</xs:restriction>
+				</xs:simpleType>
+			</xs:element>
+			<xs:element name="pid" minOccurs="0"
+				maxOccurs="unbounded">
+				<xs:simpleType>
+					<xs:restriction base="xs:positiveInteger">
+						<xs:minInclusive value="2" />
+					</xs:restriction>
+				</xs:simpleType>
+			</xs:element>
+			<xs:element name="sessionid" minOccurs="0"
+				maxOccurs="unbounded">
+				<xs:simpleType>
+					<xs:restriction base="xs:positiveInteger">
+						<xs:minInclusive value="2" />
+					</xs:restriction>
+				</xs:simpleType>
+			</xs:element>
+			<xs:element name="command" minOccurs="0"
+				maxOccurs="unbounded">
+				<xs:simpleType>
+					<xs:restriction base="xs:string">
+						<xs:minLength value="1" />
+					</xs:restriction>
+				</xs:simpleType>
+			</xs:element>
+			<xs:element name="string" minOccurs="0"
+				maxOccurs="unbounded">
+				<xs:simpleType>
+					<xs:restriction base="xs:string">
+						<xs:minLength value="1" />
+					</xs:restriction>
+				</xs:simpleType>
+			</xs:element>
+		</xs:choice>
+	</xs:group>
+	<xs:element name="filter">
+		<xs:annotation>
+			<xs:documentation>
+				Filter can contain from 1 (at least) to unlimited filter:
+				you can choise (for now) in &lt;ip&gt; &lt;port&gt; 
+				&lt;application&gt; &lt;command&gt; &lt;user&gt; &lt;group&gt; 
+				&lt;string&gt;
+			</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:choice minOccurs="1" maxOccurs="unbounded">
+				<xs:group ref="filtersGroup" />
+			</xs:choice>
+		</xs:complexType>
+	</xs:element>
+	<xs:simpleType name="schedType">
+		<xs:restriction base="xs:string">
+			<xs:enumeration value="bfifo" />
+			<xs:enumeration value="sfq" />
+			<xs:enumeration value="pfifo" />
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="sched" default="sfq">
+		<xs:annotation>
+			<xs:documentation>
+				This is an eventual scheduler for a leaf class; it can be a 
+				- b(yte)fifo, a p(ackets)fifo [which can have a 
+					&quot;limit&quot; parameter (for the queue) attribute];
+				- S(tochastic)F(air)Q(ueueing) [with &quot;quantum&quot; (Amount of data in 
+					bytes a stream is allowed to dequeue before next queue gets 
+					a turn. Defaults to one MTU-sized packet. Do not set this 
+					parameter below the MTU!) and &quot;perturb&quot; (Period of
+					hash function perturbation. If unset, hash reconfiguration 
+					will never take place which is what you probably don't want.
+					The default value of 10 seconds is probably a good value.) 
+					parameters]
+			</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:simpleContent>
+				<xs:extension base="schedType">
+					<xs:attribute name="limit" type="xs:positiveInteger"
+						use="optional" />
+					<xs:attribute name="perturb"
+						type="xs:positiveInteger" use="optional" />
+					<xs:attribute name="quantum"
+						type="xs:positiveInteger" use="optional" />
+				</xs:extension>
+			</xs:simpleContent>
+		</xs:complexType>
+	</xs:element>
+	<xs:group name="leafGroup">
+		<xs:sequence>
+			<xs:element ref="sched" minOccurs="0" maxOccurs="1" />
+			<xs:element ref="filter" minOccurs="1" maxOccurs="1" />
+		</xs:sequence>
+	</xs:group>
+	<xs:element name="class">
+		<xs:annotation>
+			<xs:documentation>
+				Class must have an id and a rate and it can have sub-classes or 
+				it can be a leaf class (in this case, attribute leaf must be 
+				specified and a &lt;filter&gt; must be present. 
+				A little digression about certain attributes: 
+				- leaf: read above; 
+				- prio: Priority of class traffic. The higher the number, 
+					the lesser the priority. Also, classes with higher priority 
+					are offered excess bandwidth first. 
+				- ceil: The maximum bandwidth that can be used by the class. The
+					difference between CEIL and RATE amounts to bandwidth the 
+					class can borrow, if there is unused bandwidth left. 
+					By default, CEIL is equal to RATE, so the class can not 
+					borrow bandwidth from its parent. If you want that the class 
+					borrow unused bandwidth, you must specify the maximal amount 
+					it can use, if available. When several classes compete for 
+					the unused bandwidth, each of the classes is given share 
+					proportional to their RATE; 
+				- burst and cburst: BURST and CBURST parameters control the 
+					amount of data that can be sent from one class at maximum 
+					(hardware) speed before trying to service other class. If 
+					CBURST is small (one packet size) it shapes bursts not to 
+					exceed CEIL rate the same way PEAK works for TBF.
+			</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="id" minOccurs="1" maxOccurs="1" />
+				<xs:element ref="rate" minOccurs="1" maxOccurs="1" />
+				<xs:choice minOccurs="0" maxOccurs="unbounded">
+					<xs:group ref="leafGroup" />
+					<xs:element ref="class" maxOccurs="unbounded" />
+				</xs:choice>
+			</xs:sequence>
+			<xs:attribute name="leaf" type="xs:string" fixed="yes"
+				use="optional" />
+			<xs:attribute name="prio" type="xs:nonNegativeInteger"
+				use="optional" />
+			<xs:attribute name="ceil" type="xs:positiveInteger"
+				use="optional" />
+			<xs:attribute name="burst" type="xs:positiveInteger"
+				use="optional" />
+			<xs:attribute name="cburst" type="xs:positiveInteger"
+				use="optional" />
+		</xs:complexType>
+	</xs:element>
+	<xs:attribute name="direction">
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:enumeration value="download" />
+				<xs:enumeration value="upload" />
+				<xs:enumeration value="both" />
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:attribute>
+</xs:schema>

@@ -1,0 +1,53 @@
+<!-- 
+Copyright 2005, Massimiliano Leone <massimiliano.leone@studio.unibo.it>, GPL License
+	        Example File 
+-->
+
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="/var/lib/k-shaper/schema/config.xsd">
+  <queue direction="download">
+    <root default="1">
+      <class>
+        <id name="first">2</id>
+        <rate unit="mbit">10</rate>
+        <class>
+        	<id name="http">10</id>
+        	<rate unit="mbit">3</rate>
+        	<filter>
+        		<port target="destination" protocol="tcp">80</port>
+        	</filter>
+        </class>
+        <class>
+        	<id name="remote_commands">20</id>
+        	<rate unit="mbit">2</rate>
+        	<class>
+        		<id name="ssh">22</id>
+        		<rate unit="mbit">1</rate>
+        		<filter>
+        			<application>ssh</application>
+        		</filter>
+        	</class>
+        	<class>
+        		<id name="telnet">23</id>
+        		<rate unit="mbit">1</rate>
+        		<filter>
+        			<ip target="source">10.0.0.4</ip>
+        			<application>telnet</application>
+        		</filter>
+        	</class>
+        </class>
+        <class>
+        	<id name="local_p2p">30</id>
+        	<rate unit="mbit">1</rate>
+        	<filter>
+        		<pid>900</pid>
+        	</filter>
+        </class>
+        <class>
+        	<id name="default">100</id>
+        	<rate unit="kbit">1</rate>
+        </class>
+      </class>
+    </root>
+  </queue>
+</config>

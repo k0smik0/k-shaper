@@ -1,0 +1,20 @@
+<!-- 
+Copyright 2005, Massimiliano Leone <massimiliano.leone@studio.unibo.it>, GPL License
+	        Example File 
+-->
+
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="/var/lib/k-shaper/schema/config.xsd">
+  <queue dcache="yes" direction="download" r2q="10">
+    <root default="1">
+      <class burst="1" cburst="1" ceil="1" leaf="yes" name="default" prio="0">
+        <id name="">1</id>
+        <rate unit="kbit">1</rate>
+        <sched limit="1" perturb="1" quantum="1">sfq</sched>
+        <filter>
+          <ip target="source">ip</ip>
+        </filter>
+      </class>
+    </root>
+  </queue>
+</config>

@@ -1,0 +1,620 @@
+#!/usr/bin/perl
+
+
+# Copyright 2005, Massimiliano Leone <massimiliano.leone@studio.unibo.it>
+#
+# k-shaper is a perl script useful to configure a shaping system
+# for your linux box. It parses an xml config file and run some commands.
+# That's all :D
+# Please look at examples and at schema in /var/lib/k-shaper/schema/config.xsd
+# to know how write a right config.xml
+#
+#
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+
+
+use Getopt::Long;
+use Term::ANSIColor qw(:constants);
+use File::Basename;
+use File::Copy;
+use XML::LibXML;
+use XML::Xerces;
+use XML::Schematron::XPath;
+use strict;
+
+
+sub checkReadingFile {
+	my $file = shift (@_);
+	if ($file) {
+		if ( ! -e $file ) {
+			die "File \"$file\" not found.\n";
+		}
+		elsif ( ! -r $file ) {
+			die "No permission to read from \"$file\".\n";
+		}
+	}
+}
+
+sub checkWritingFile {
+	my $file = shift (@_);
+	if (-e $file) {
+		if ( ! -w $file ) {
+			die "No permission to write in \"$file\".\n";
+		}
+	}
+}
+
+sub flushRules {
+	my $cache = shift (@_);
+	my $deletingCache = dirname($cache)."/cacheDel.sh";
+			
+	checkReadingFile($cache);
+	checkWritingFile($deletingCache);
+	open (FH_R,$cache) || die "Cannot open reading filehandle for $cache\n";
+	open (FH_W,">>$deletingCache") || die "Cannot open writing filehandle for $deletingCache\n";
+	my $output;
+	while (<FH_R>) { 
+		chomp;
+		if ( ($_ =~ "ifconfig")  && $_ =~ s/up/down/g || 
+		     ( $_ =~ "root" )    && $_ =~ s/add/del/g || 
+		     ( $_ =~ "iptables") && $_ =~ s/-A/-D/g   ) {
+		     	print FH_W "$_\n";
+		}
+	}
+	print FH_W "\n";
+	close (FH_R) || die "Can't close $cache: $!";
+	close (FH_W) || die "Can't close $deletingCache: $!";
+	
+	return $deletingCache;
+}
+
+sub getRulesFromCache {
+	my $cache = shift (@_);
+	checkReadingFile($cache);
+	open (FH,$cache) || die "Cannot open reading filehandle for $cache\n";
+	my $output;
+	while (<FH>) { 
+		chomp;
+		$output = $output."$_\n";
+	}
+	close (FH) || die "Can't close $cache: $!";
+	return $output;
+}
+
+sub parseClass {
+	my $class = shift(@_);
+	my $dev = shift(@_);
+	my $kernel = shift(@_);
+
+	my $prio = "";
+	my $ceil = "";
+	my $burst = "";
+	my $cburst = "" ;
+
+	if ($class->getAttribute("prio")) {
+		$prio = "prio ".$class->getAttribute("prio");
+	}
+	if ($class->getAttribute("ceil")) {
+		$ceil = "ceil ".$class->getAttribute("ceil");
+	}
+	if ($class->getAttribute("burst")) {
+		$burst = "burst ".$class->getAttribute("burst");
+	}
+	if ($class->getAttribute("cburst")) {
+		$burst = "cburst ".$class->getAttribute("cburst");
+	}
+		
+	my @idList = $class->getElementsByTagName("id");	
+	my $id = $idList[0]->getFirstChild->getData();
+		
+	#my $name = "name=".$idList[0]->getAttribute("name");
+	
+	my @rateList = $class->getElementsByTagName("rate");	
+	my $rate = $rateList[0]->getFirstChild->getData();
+	my $rateUnit = $rateList[0]->getAttribute("unit");
+	
+	my $parentId; 
+	if ($id != 2) {
+		 $parentId = ($class->parentNode->getElementsByTagName("id"))[0]->getFirstChild->getData();
+	}
+	else {
+		$parentId = 1;
+	}
+		 		
+	my $thisRun = "\ntc class add dev $dev  parent $parentId  classid $id htb $prio rate $rate$rateUnit $ceil  $burst  $cburst";
+
+	
+	my $leaf = "";
+	if ($class->getAttribute("leaf")) {
+		$leaf = $class->getAttribute("leaf");
+	}
+		#print $leaf;
+	if ($leaf eq "yes") {
+		
+		my $sched = ($class->getElementsByTagName("sched"))[0];
+		if ($sched) { 
+			$thisRun = $thisRun.parseSched($sched,$dev,$id); 
+			}
+		#my $thisSched = parseSched($sched,$dev,$id);
+		#$thisRun = $thisRun.$thisSched;
+		
+		$thisRun = $thisRun."\ntc filter add dev $dev protocol ip parent 1:0 prio 1 handle $id fw classid $id";
+		my @filtersList = $class->getElementsByTagName("filter");
+		foreach my $f (@filtersList) {
+			if ($f) {
+				my $thisFilter = parseFilter($f,$id,$kernel);
+				$thisRun = $thisRun.$thisFilter;
+			}
+		}
+	}
+	$thisRun = $thisRun."\n"; 
+	return $thisRun;
+}
+
+sub parseFile {
+	my $file = shift (@_);
+
+	my $output = "";
+
+	checkReadingFile($file);
+	
+	validConfigFile($file);
+	
+	my $parser = XML::LibXML->new();
+	my $tree = $parser->parse_file($file);
+	
+	my $doc = $tree->getDocumentElement(); 
+	
+	my @queues = $doc->getElementsByTagName("queue");
+	
+	my $kernel = `uname -r`;
+	chomp($kernel);
+	
+	my $imqModule = "/lib/modules/$kernel/kernel/drivers/net/imq.ko";
+	
+	if ( -f $imqModule ) {
+		$output = "modprobe imq\n\n\n"		
+	}
+	
+	foreach my $q (@queues) {
+		my $run = parseQueue($q,$kernel);
+		$output .= $run."\n\n";
+	}
+	chomp ($output);
+	chomp ($output);
+	return $output;
+}
+
+sub checkModule {
+	my $kernel = shift(@_);
+	my $module = shift(@_);
+	my $tag = shift(@_);
+	
+	my $iptLib = "/lib/iptables/libipt_$module.so";
+	my $netfilterModule = "/lib/modules/$kernel/kernel/net/ipv4/netfilter/ipt_$module.ko";
+	if (!( -e $iptLib || -e $netfilterModule )) {
+		print "You must have <$module> library for iptables and netfilter to use $tag filter\n";
+		die "No $iptLib nor $netfilterModule found\n";
+	}
+}
+
+sub parseFilter {
+	my $filter = shift (@_);
+	my $id = shift (@_);
+	my $kernel = shift(@_);
+	
+	#print $kernel;
+	
+	my @filterTags = ("ip","port","application","pid","user","group","session","command","string");
+	my $thisRun;
+	
+	foreach my $ft (@filterTags) {
+		
+		my @sf = $filter->getElementsByTagName($ft);
+		
+		foreach my $f (@sf) {
+			my $iptString = "\niptables -t mangle -A POSTROUTING ";
+			$thisRun = $thisRun.$iptString;
+			
+			#layer3: ip
+			if ($ft eq "ip") {
+				my $ip = $f->getFirstChild->getData();
+				my $target = $f->getAttribute("target");
+				if ($target eq "source") {
+					$thisRun = $thisRun."--source $ip ";
+					
+				}
+				elsif ($target eq "destination") {
+					$thisRun = $thisRun."--destination $ip ";
+				}
+			}
+			#layer4: port
+			if ($ft eq "port") {
+				my $port = $f->getFirstChild->getData();
+				my $protocol = $f->getAttribute("protocol");
+				my $target = $f->getAttribute("target");
+				if ($protocol eq "tcp") {
+					$thisRun = $thisRun."-p tcp ";
+				}
+				elsif ($protocol eq "udp") {
+					$thisRun = $thisRun."-p udp ";
+				}
+				if ($target eq "source") {
+					$thisRun = $thisRun."--source-port $port ";
+				}
+				elsif ($target eq "destination") {
+					$thisRun = $thisRun."--destination-port $port ";
+				}
+			}
+			#local process: pid
+			if ($ft eq "pid") {
+				my $module = "owner";
+				checkModule($kernel,$module,$ft);
+				
+				my $pid = $f->getFirstChild->getData();
+				$thisRun = $thisRun."-m owner --pid-owner $pid ";
+			}
+			#local process: user
+			if ($ft eq "user") {
+				my $module = "owner";
+				checkModule($kernel,$module,$ft);
+				
+				my $user = $f->getFirstChild->getData();
+				my $userId = `id -u $user`;
+				substr($userId, -1, 1) = "";
+				$thisRun = $thisRun."-m owner --uid-owner $userId "
+			}
+			#local process: group
+			if ($ft eq "group") {
+				my $module = "owner";
+				checkModule($kernel,$module,$ft);
+				
+				my $group = $f->getFirstChild->getData();
+				my $groupId = "".`id -g group`;
+				substr($groupId, -1, 1) = "";
+				$thisRun = $thisRun."-m owner --gid-owner $groupId "
+			}
+			#local process: session
+			if ($ft eq "session") {
+				my $module = "owner";
+				checkModule($kernel,$module,$ft);
+				
+				my $session = $f->getFirstChild->getData();
+				my $sessionId;
+				$thisRun = $thisRun."-m owner --sid-owner $sessionId "
+			}
+			#local process: command
+			if ($ft eq "command") {
+				my $module = "owner";
+				checkModule($kernel,$module,$ft);
+				
+				my $command = $f->getFirstChild->getData();
+				$thisRun = $thisRun."-m owner --cmd-owner $command "
+			}
+			if ($ft eq "application") {
+				my $module = "layer7";
+				checkModule($kernel,$module,$ft);
+				
+				my $application = $f->getFirstChild->getData();
+				$thisRun = $thisRun."-m layer7 --l7proto $application ";
+			}
+			if ($ft eq "string") {
+				my $module = "string";
+				checkModule($kernel,$module,$ft);
+				
+				my $string = $f->getFirstChild->getData();
+				$thisRun = $thisRun."-m string --string $string ";
+			}
+			
+			$thisRun = $thisRun." -j MARK --set-mark $id";		
+		}
+	}
+	return $thisRun;
+}
+	
+		
+sub parseQueue {
+	my $queue = shift (@_);
+	my $kernel = shift (@_);
+
+	my $dev = "DEV";
+	my $run = "ifconfig $dev up \n\n";	
+	
+	#qdisc
+	my $root = ($queue->getElementsByTagName("root"))[0];
+	my $default = $root->getAttribute("default");
+
+	my $addRootQdisc = "tc qdisc add dev $dev root handle 1 htb";
+	if ($default) {
+		$addRootQdisc = $addRootQdisc." default $default ";
+	}
+	$run = $run.$addRootQdisc;
+	$run = $run."\n";
+			
+	#my $kernel = `/bin/uname -r`;
+			
+	#classes
+	my @classes = $root->getElementsByTagName("class");
+	foreach my $class (@classes) {
+		my $thisRun = parseClass($class,$dev,$kernel);
+		$run = $run.$thisRun;
+	}
+	
+	#direction(s) 
+	my $direction = $queue->getAttribute("direction");
+	if ($direction eq "download") {
+		$dev = "imq0";
+		$run =~ s/DEV/imq0/g;
+		$run = $run."\niptables -t mangle -A PREROUTING -j IMQ --todev 0\n";
+	}
+	elsif ($direction eq "upload") {
+		$dev = "imq1";
+		$run =~ s/DEV/imq1/g;
+		$run = $run."\niptables -t mangle -A POSTROUTING -j IMQ --todev 1";
+	}
+	if ($direction eq "both") {
+		#download
+		$run =~ s/DEV/imq0/g;
+		$run = $run."\niptables -t mangle -A PREROUTING -j IMQ --todev 0";
+		my $oldRun = $run."\n";
+		#upload
+		$run =~ s/imq0/imq1/g;
+		$run =~ s/PREROUTING/POSTROUTING/g;
+		$run =~ s/--todev 0/--todev 1/g;
+		$run = $run;
+		$run = $oldRun."\n\n".$run."\n";
+	}			
+	return $run;
+}
+
+sub parseSched {
+	my $sched = shift(@_);
+	my $dev = shift(@_);
+	#my $allParentIdsString = shift(@_);
+	my $id = shift(@_);
+
+	my $quantum = "";
+	my $perturb = "";
+	my $limit = "";
+	
+	if ($sched->getAttribute("limit")) {
+		$limit = "limit ".$sched->getAttribute("limit");
+	}
+	if ($sched->getAttribute("quantum")) {
+		$quantum = "quantum ".$sched->getAttribute("quantum");
+	}
+	if ($sched->getAttribute("perturb")) {
+		$perturb = "perturb ".$sched->getAttribute("perturb");
+	}
+	
+	my $alg = $sched->getFirstChild->getData();
+	my $thisRun = "\ntc qdisc add dev $dev  parent 1:$id handle $id $alg  $limit $quantum $perturb";
+	return $thisRun;
+}
+
+sub validConfigFile {
+	my $file = shift (@_);
+	
+	
+	my $schemaFile = "/var/lib/k-shaper/schema/config.xsd";
+	 
+	##validation against schema
+	my $parser = XML::Xerces::XercesDOMParser->new();
+	my $validate = $XML::Xerces::AbstractDOMParser::Val_Always;
+	$parser->setValidationScheme ($validate);
+	my $namespace = 1;
+	$parser->setDoNamespaces ($namespace);
+	$parser->setCreateEntityReferenceNodes(1);
+	my $schema = 1;
+	
+	$parser->setDoSchema ($schema);
+	$parser->setExternalNoNamespaceSchemaLocation($schemaFile);
+
+	my $error_handler = XML::Xerces::PerlErrorHandler->new();
+	$parser->setErrorHandler($error_handler);
+
+	eval {
+		$parser->parse ($file);
+	};
+	XML::Xerces::error("Error in validating against schema: \n".$@) if ($@);
+	
+	
+	##validation against schematron
+	my $schematronFile = $schemaFile;
+	my $pseudotron = XML::Schematron::XPath->new(schema => $schematronFile);
+	my $messages = $pseudotron->verify($file);
+	if ($messages) {
+		die "Errors in validation against schematron: \n".$messages;
+	}
+}
+
+sub writeCache {
+	my $cache = shift (@_);
+	my $text = shift (@_);
+	
+	my $dir = dirname($cache);
+	if (-e $cache ) {
+		if (! -w $dir) {
+			print "Cannot write in $dir. No cache.sh.bak allowed\n";
+		}
+		else {
+			my $file = basename($cache);
+			my $bak = $file.".bak";
+			rename($cache,"$dir/$bak") || print "Can't rename $file to $bak in $dir: $!";
+		}
+	}
+	
+	checkWritingFile($cache);
+	open (FH,">$cache") || die "Cannot open writing filehandle for $cache\n";
+	print FH $text ;
+	close (FH);
+}
+
+
+
+
+#Display usage help.
+sub usage {
+	print STDERR 
+"k-shaper v.0.2 (CopyLeft) 2005 Massimiliano Leone
+
+Usage:
+ $0 [options]
+
+ Options:
+   -a|--add-rules			Add rules parsing data from /etc/k-shaper/config.xml
+   -c|--cache-file=<cache.sh>		Use <cache.sh> as rules cache file [instead of /var/lib/k-shaper/cache.sh]
+   -f|--flush-rules			Flush actual rules
+   -l|--list-rules			List actual rules
+   -n|--nice-output			Print eventually output nicely ;-) [it work with -t, or -l, or -a (with -v), or -f (with -v)]
+   -t|--view-rules			View rules parsing data from /etc/k-shaper/config.xml or <file.xml> given by -x option
+   -x|--config-file=<file.xml>		Use <file.xml> as configuration for build traffic control rules [instead of /etc/k-shaper/config.xml]
+   -v|--verbose				Print rules on --add or --flush
+   -h|--help				Print this help
+   
+You must specify at least 1 option.
+";
+      	exit 1;
+}
+
+
+my ($add,$flush,$list,$help,$test,$verbose,$nice);
+my $config = "";
+my $cache = "";
+
+GetOptions (
+	"add-rules|a"				=> \$add,
+	"cache-file|c=s"			=> \$cache,
+	"configuration-file|x=s"	=> \$config,
+	"flush-rules|f"				=> \$flush,
+	"list-rules|l"				=> \$list,
+	"nice-output|n"				=> \$nice,
+	"view-rules|t"				=> \$test,
+	"help|h"					=> \&usage,
+	"verbose|v"					=> \$verbose,
+) || usage();
+
+
+
+#a few sanity checks.
+if ($flush && $add || $flush && $list || $flush && $test || $flush && $help || $flush && $config) {
+	print "You can not use --flush with others, except --cache.\n\n";
+	print "Use -h for options\n";
+	exit 1;
+}
+if ($add && $list || $test && $list || $add && $help || $test && $help) {
+	print "You can not use --add (or --test) with --list (or --help).\n\n";
+	print "Use -h for options\n";
+	exit 1;
+}
+
+if ($cache && $test) {
+	print "You can not use --cache with --test\n";
+	print "Use -h for options\n";
+	exit 1;
+}
+
+if ( ($cache && !($flush == 1)) && ($cache && !($list == 1)) && ($cache && !($add == 1)) ) {
+	print "What can i do with cache.sh file without a --add, --list or --flush option?\n";
+	print "Use -h for options\n";
+	exit 1;
+}
+if ( ($config && !($test == 1)) && ($config && !($add == 1)) ) {
+	print "What can i do with config.xml file without a --test or --add option?\n";
+	print "Use -h for options\n";
+	exit 1;
+}
+
+	
+if (!$config) {
+	$config = "/etc/k-shaper/config.xml";
+}
+if (!$cache) {
+	$cache = "/var/lib/k-shaper/cache.sh";
+}
+
+
+#start traffic control
+if ($add) {
+	if ($> !=0) { 
+		die "Must run as root to add rules!\nUse -h for options\n";
+	}		
+	my $output = parseFile($config);
+	if ($verbose) {
+		if ($nice) {
+			print "Adding rules, running this...\n\n";
+			print RED, ON_BLACK, $output."\n";
+		}
+	}
+	else {
+		print "Adding rules... ";
+	}
+	writeCache($cache,$output);
+	my @args = ("sh", $cache);
+	system(@args) == 0 || die "System @args failed: $?";
+	print RESET,"done\n";
+	exit 0;	
+}
+#test rules
+if ($test) {
+	my $output = parseFile($config);
+	if ($nice) {
+			print BLUE, ON_BLACK, $output."\n\n", RESET;
+		}
+		else {
+			print $output;
+		}
+	exit 0;
+}
+#list rules
+if ($list) {
+	my $output = getRulesFromCache($cache);
+	if ($nice) {
+			print YELLOW, ON_BLACK, $output."\n\n", RESET;
+		}
+		else {
+			print $output;
+		}
+	exit 0;
+}
+#stop traffic control
+if ($flush) {
+	if ($> !=0) { 
+		die "Must run as root to flush rules!\nUse -h for options\n";
+	}
+	my $deletingCache = flushRules($cache);
+	if ($verbose) {
+		open(FH,$deletingCache) || die "Cannot open reading filehandle for $deletingCache\n";
+		print "Flushing rules, running this...\n\n";
+		while (<FH>) {
+			print GREEN, ON_BLACK, "$_";
+		}
+	}
+	else {
+		print "Flushing... ";
+	}
+	my @args = ("sh", $deletingCache);
+	system(@args) == 0 || unlink($deletingCache) && die "system @args failed: $?";
+	unlink($deletingCache) || die "Can't unlink $deletingCache: $!";
+	print RESET,"done\n",RESET;
+	exit 0;
+}
+
+
+unless (@ARGV) {
+	usage();
+	print STDERR "You must specify an option.\n";
+}

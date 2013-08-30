@@ -1,0 +1,4 @@
+<!-- This is a skeleton config file -->
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="/var/lib/k-shaper/schema/config.xsd">

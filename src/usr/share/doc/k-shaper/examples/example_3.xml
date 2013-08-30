@@ -1,0 +1,74 @@
+<!-- 
+Copyright 2005, Massimiliano Leone <massimiliano.leone@studio.unibo.it>, GPL License
+	        Example File 
+-->
+
+<config xsi:noNamespaceSchemaLocation="/var/lib/k-shaper/schema/config.xsd" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">  
+  <queue direction="both">
+    <root default="200">
+      <class burst="15">
+        <id>2</id>
+        <rate unit="mbit">10</rate>
+        <class burst="15">
+          <id name="remoteCommands">20</id>
+          <rate unit="mbit">3</rate>
+          <class burst="15" leaf="yes">
+            <id name="ssh">22</id>
+            <rate unit="mbit">3</rate>
+            <sched>
+              <alg perturb="10">sfq</alg>
+            </sched>
+            <filter>
+              <application>ssh</application>
+            </filter>
+          </class>
+          <class prio="0" burst="15" cburst="10" leaf="yes">
+            <id name="telnet">23</id>
+            <rate unit="mbit">3</rate>
+            <filter>
+              <ip target="source">192.168.0.14</ip>
+              <application>telnet</application>
+            </filter>
+          </class>
+        </class>
+        <class burst="15" leaf="yes">
+          <id name="http">10</id>
+          <rate unit="mbit">10</rate>
+          <sched>
+            <alg perturb="10">sfq</alg>
+          </sched>
+          <filter>
+            <port protocol="tcp" target="destination">80</port>
+            <port protocol="tcp" target="destination">443</port>
+          </filter>
+        </class>
+        <class burst="15" leaf="yes">
+          <id name="local_p2p">33</id>
+          <rate unit="mbit">2</rate>
+          <sched>
+            <alg perturb="10">sfq</alg>
+          </sched>
+          <filter>
+            <user>k0smik0</user>
+            <pid>5600</pid>
+          </filter>
+        </class>
+        <class>
+          <id name="asddsad">50</id>
+          <rate unit="mbit">1</rate>
+        </class>
+        <class ceil="500" burst="15" leaf="yes">
+          <id name="default">200</id>
+          <rate unit="mbit">1</rate>
+          <sched>
+            <alg perturb="10">sfq</alg>
+          </sched>
+        </class>
+      </class>
+
+
+    </root>
+  </queue>
+  
+</config>
