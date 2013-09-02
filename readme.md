@@ -2,9 +2,11 @@
 
 
 
-## UPDATE (2009) !!!
+#### UPDATE (2009) !!!
 The virtual interface used to handle traffic flow is "IMQ": it is not available anymore in recent kernels, and the new one is "IFB" - I don't have time to update perl script, but I think it is not so difficult: perhaps a few of "string replace", eventually with right arguments.
 
+
+-----------------------------------------------
 
 K-Shaper is tool for traffic-shaping in a Linux router/firewal based network.  
 
